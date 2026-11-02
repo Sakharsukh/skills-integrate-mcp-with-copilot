@@ -90,43 +90,52 @@ def get_activities():
 
 @app.post("/activities/{activity_name}/signup")
 def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
-    # Validate activity exists
+    """Sign up a student, or add them to the waitlist when full."""
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
-    # Get the specific activity
     activity = activities[activity_name]
+    activity.setdefault("waitlist", [])
 
-    # Validate student is not already signed up
     if email in activity["participants"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Student is already signed up"
-        )
+        raise HTTPException(status_code=400, detail="Student is already signed up")
+    if email in activity["waitlist"]:
+        raise HTTPException(status_code=400, detail="Student is already on the waitlist")
 
-    # Add student
+    if len(activity["participants"]) >= activity["max_participants"]:
+        activity["waitlist"].append(email)
+        return {
+            "message": f"Added {email} to the waitlist for {activity_name}",
+            "waitlisted": True,
+        }
+
     activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
+    return {"message": f"Signed up {email} for {activity_name}", "waitlisted": False}
 
 
 @app.delete("/activities/{activity_name}/unregister")
 def unregister_from_activity(activity_name: str, email: str):
-    """Unregister a student from an activity"""
-    # Validate activity exists
+    """Unregister a student and promote the next waitlisted student."""
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
-    # Get the specific activity
     activity = activities[activity_name]
+    activity.setdefault("waitlist", [])
 
-    # Validate student is signed up
+    if email in activity["waitlist"]:
+        activity["waitlist"].remove(email)
+        return {"message": f"Removed {email} from the waitlist for {activity_name}"}
+
     if email not in activity["participants"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Student is not signed up for this activity"
-        )
+        raise HTTPException(status_code=400, detail="Student is not signed up for this activity")
 
-    # Remove student
     activity["participants"].remove(email)
-    return {"message": f"Unregistered {email} from {activity_name}"}
+    promoted_email = None
+    if activity["waitlist"]:
+        promoted_email = activity["waitlist"].pop(0)
+        activity["participants"].append(promoted_email)
+
+    message = f"Unregistered {email} from {activity_name}"
+    if promoted_email:
+        message += f"; promoted {promoted_email} from the waitlist"
+    return {"message": message, "promoted": promoted_email}
